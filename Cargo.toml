@@ -1,17 +1,18 @@
 [package]
-name = "swapview"
-version = "0.1.0"
+name = "smapview"
+version = "0.2.0"
 authors = ["lilydjwg <lilydjwg@gmail.com>"]
 edition = "2021"
 license = "BSD-3-Clause"
-keywords = ["swap"]
-description = " A simple program to view processes' swap usage on Linux. "
-homepage = "https://github.com/lilydjwg/swapview"
-repository = "https://github.com/lilydjwg/swapview"
+keywords = ["swap", "memory", "linux"]
+description = "A simple program to view processes' different kinds of memory usage on Linux."
+homepage = "https://github.com/lilydjwg/smapview"
+repository = "https://github.com/lilydjwg/smapview"
 readme = "README.md"
 
 [dependencies]
-rayon = "1.5.1"
+clap = { version = "4.5.46", default-features = false, features = ["std", "derive", "help", "usage"] }
+rayon = "1.11.0"
 
 [profile.release]
 lto = true

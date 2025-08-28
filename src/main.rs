@@ -1,9 +1,9 @@
-extern crate rayon;
-
 use std::fs::{File,read_dir};
 use std::io::Read;
 use std::sync::mpsc::channel;
+
 use rayon::prelude::*;
+use clap::Parser;
 
 const UNITS: [char; 4] = ['K', 'M', 'G', 'T'];
 
@@ -47,7 +47,7 @@ fn get_comm_for(pid: usize) -> String {
   chop_null(buf)
 }
 
-fn get_swap_for(pid: usize) -> isize {
+fn get_usage_for(pid: usize, field: &[u8]) -> isize {
   let smaps_path = format!("/proc/{}/smaps_rollup", pid);
 
   let mut file = match File::open(&smaps_path) {
@@ -60,8 +60,8 @@ fn get_swap_for(pid: usize) -> isize {
     return 0
   }
   for line in vec.split(|&c| c == b'\n') {
-    if line.starts_with(b"Swap:") {
-      let string = line[5..]
+    if line.starts_with(field) {
+      let string = line[field.len()..]
         .iter()
         .skip_while(|&&c| c == b' ')
         .take_while(|&&c| c != b' ')
@@ -73,7 +73,7 @@ fn get_swap_for(pid: usize) -> isize {
   0
 }
 
-fn get_swap() -> Vec<(usize, isize, String)> {
+fn get_usage(field: &[u8]) -> Vec<(usize, isize, String)> {
   rayon::in_place_scope(|pool| {
     let (tx, rx) = channel();
     for d in read_dir("/proc").unwrap() {
@@ -81,9 +81,9 @@ fn get_swap() -> Vec<(usize, isize, String)> {
       pool.spawn(move |_| {
         let path = d.unwrap().path();
         if let Ok(pid) = path.file_name().unwrap().to_str().unwrap().parse() {
-          tx.send(match get_swap_for(pid) {
+          tx.send(match get_usage_for(pid, field) {
             0 => None,
-            swap => Some((pid, swap, get_comm_for(pid))),
+            usage => Some((pid, usage, get_comm_for(pid))),
           }).unwrap();
         } else {
           tx.send(None).unwrap();
@@ -91,23 +91,41 @@ fn get_swap() -> Vec<(usize, isize, String)> {
       });
     }
     drop(tx);
-    rx.iter().filter_map(|x| x).collect()
+    rx.iter().flatten().collect()
   })
 }
 
+#[derive(Parser, Debug)]
+#[command(version, about)]
+struct Args {
+  /// which /proc/PID/smaps_rollup field to look at
+  #[arg(short, long, default_value="Swap")]
+  field: String,
+}
+
+#[allow(clippy::print_literal)]
 fn main() {
+  let args = Args::parse();
+
+  let mut field = args.field;
+  if !field.ends_with(":") {
+    field.push(':');
+  }
+
   // let format = "{:>5} {:>9} {}";
   // let totalFmt = "Total: {:8}";
-  let mut swapinfo = get_swap();
-  swapinfo.par_sort_unstable_by_key(|&(_, size, _)| size);
+  let mut usageinfo = get_usage(field.as_bytes());
+  usageinfo.par_sort_unstable_by_key(|&(_, size, _)| size);
 
-  println!("{:>7} {:>9} {}", "PID", "SWAP", "COMMAND");
+  let field_name = field.trim_matches(':').to_ascii_uppercase();
+  let field_width = field_name.len().max(9);
+  println!("{:>7} {:>w$} {}", "PID", field_name, "COMMAND", w = field_width);
   let mut total = 0;
-  for &(pid, swap, ref comm) in &swapinfo {
-    total += swap;
-    println!("{:>7} {:>9} {}", pid, filesize(swap), comm);
+  for &(pid, usage, ref comm) in &usageinfo {
+    total += usage;
+    println!("{:>7} {:>w$} {}", pid, filesize(usage), comm, w = field_width);
   }
-  println!("Total: {:>10}", filesize(total));
+  println!("Total: {:>w$}", filesize(total), w = field_width + 1);
 }
 
 // vim: se sw=2:
